@@ -96,6 +96,11 @@ export class ViewerScene {
     polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1, // keep edge lines on top
   });
   readonly #edgeMaterial = new LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.45 });
+  /** X-ray: everything outside the focus colours, drawn as a faint ghost that never hides what is behind it. */
+  readonly #ghostMaterial = new MeshPhongMaterial({
+    vertexColors: true, flatShading: true, side: DoubleSide, transparent: true, opacity: 0.1, depthWrite: false,
+  });
+  readonly #ghostEdgeMaterial = new LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.18, depthWrite: false });
   readonly #axisMaterials: AxisMaterials[] = [0, 1, 2].map(() => ({
     solid: new MeshBasicMaterial(),
     // Transparent, so it draws after the model; without a depth test, it shows through it.
@@ -111,6 +116,13 @@ export class ViewerScene {
   #gridSize = 200;
   #mesh: Mesh | null = null;
   #edges: LineSegments | null = null;
+  #ghost: Mesh | null = null;
+  #ghostEdges: LineSegments | null = null;
+  #data: ViewerMesh | null = null;
+  #offset = new Vector3();
+  #xray = false;
+  /** Packed sRGB colours (0xRRGGBB) kept solid in X-ray mode; empty = ghost everything. */
+  #focus: number[] = [];
   /** Per triangle: 1 = painted with the model colour. */
   #defaultMask: Uint8Array | null = null;
   #home: { position: Vector3; target: Vector3 } | null = null;
@@ -175,10 +187,27 @@ export class ViewerScene {
   setEdges(visible: boolean): void {
     this.#showEdges = visible;
     if (this.#edges) this.#edges.visible = visible;
+    if (this.#ghostEdges) this.#ghostEdges.visible = visible;
+  }
+
+  /** X-ray mode: only triangles in the focus colours stay solid; the rest becomes a faint ghost. */
+  setXray(on: boolean): void {
+    if (on === this.#xray) return;
+    this.#xray = on;
+    this.#buildModel();
+  }
+
+  /** Focus colours for X-ray mode, packed 0xRRGGBB. */
+  setXrayFocus(colors: number[]): void {
+    const same = colors.length === this.#focus.length && colors.every((c, i) => c === this.#focus[i]);
+    if (same) return;
+    this.#focus = colors;
+    if (this.#xray) this.#buildModel();
   }
 
   setWireframe(on: boolean): void {
     this.#material.wireframe = on;
+    this.#ghostMaterial.wireframe = on;
   }
 
   setAutoRotate(on: boolean): void {
@@ -189,7 +218,7 @@ export class ViewerScene {
   setGrid(visible: boolean): void {
     this.#showGrid = visible;
     if (this.#grid) this.#grid.visible = visible;
-    this.#axes.visible = visible && this.#mesh !== null;
+    this.#axes.visible = visible && this.#data !== null;
   }
 
   /** Colour for parts without color(). */
@@ -208,27 +237,18 @@ export class ViewerScene {
   load(data: ViewerMesh): void {
     const geo = new BufferGeometry();
     geo.setAttribute("position", new BufferAttribute(data.positions, 3));
-    geo.setAttribute("color", new BufferAttribute(data.colors, 3));
-    geo.computeVertexNormals();
     geo.computeBoundingBox();
-
-    const hadModel = this.#mesh !== null;
-    this.#removeModel();
-    this.#defaultMask = data.defaultMask;
-    const mesh = new Mesh(geo, this.#material);
-    this.#mesh = mesh;
-    this.#paintColors();
     const box = geo.boundingBox!;
+    geo.dispose();
+
+    const hadModel = this.#mesh !== null || this.#ghost !== null;
+    this.#data = data;
+    this.#defaultMask = data.defaultMask;
     const c = box.getCenter(new Vector3());
     // Sit the model on the grid, centred in X/Y.
     const offset = new Vector3(-c.x, -c.y, -box.min.z);
-    mesh.position.copy(offset);
-    this.#scene.add(mesh);
-    const edges = new LineSegments(new EdgesGeometry(geo, 35), this.#edgeMaterial);
-    edges.position.copy(offset);
-    edges.visible = this.#showEdges;
-    this.#edges = edges;
-    this.#scene.add(edges);
+    this.#offset = offset;
+    this.#buildModel();
 
     const size = box.getSize(new Vector3());
     const radius = Math.max(size.length() / 2, 0.5);
@@ -255,6 +275,86 @@ export class ViewerScene {
     this.#fill.position.set(-radius * 3, radius * 2, -radius);
   }
 
+  /** (Re)creates the meshes from #data: one solid mesh, or in X-ray mode a solid focus mesh plus a ghost mesh. */
+  #buildModel(): void {
+    const data = this.#data;
+    this.#removeModel();
+    if (!data) return;
+    const n = data.triangles;
+    let solidSel: Uint8Array | null = null; // null = every triangle solid
+    if (this.#xray) {
+      solidSel = new Uint8Array(n);
+      const focus = this.#focus;
+      if (focus.length) {
+        for (let t = 0; t < n; t++) {
+          const c = data.srgb[t];
+          if (c < 0) continue;
+          for (const f of focus) {
+            // Small tolerance: colours go through OpenSCAD and back as bytes.
+            if (Math.abs(((c >> 16) & 255) - ((f >> 16) & 255)) <= 2 && Math.abs(((c >> 8) & 255) - ((f >> 8) & 255)) <= 2 && Math.abs((c & 255) - (f & 255)) <= 2) {
+              solidSel[t] = 1;
+              break;
+            }
+          }
+        }
+      }
+    }
+    const solid = this.#subset(data, solidSel, 1);
+    if (solid) {
+      this.#mesh = new Mesh(solid.geo, this.#material);
+      this.#mesh.userData.mask = solid.mask;
+      this.#edges = new LineSegments(new EdgesGeometry(solid.geo, 35), this.#edgeMaterial);
+      this.#edges.visible = this.#showEdges;
+    }
+    if (solidSel) {
+      const ghost = this.#subset(data, solidSel, 0);
+      if (ghost) {
+        this.#ghost = new Mesh(ghost.geo, this.#ghostMaterial);
+        this.#ghost.userData.mask = ghost.mask;
+        this.#ghost.renderOrder = 1; // after the solid parts
+        this.#ghostEdges = new LineSegments(new EdgesGeometry(ghost.geo, 35), this.#ghostEdgeMaterial);
+        this.#ghostEdges.visible = this.#showEdges;
+        this.#ghostEdges.renderOrder = 1;
+      }
+    }
+    for (const obj of [this.#mesh, this.#edges, this.#ghost, this.#ghostEdges]) {
+      if (!obj) continue;
+      obj.position.copy(this.#offset);
+      this.#scene.add(obj);
+    }
+    this.#paintColors();
+  }
+
+  /** Geometry of the triangles whose `sel` byte equals `want` (all of them when `sel` is null). */
+  #subset(data: ViewerMesh, sel: Uint8Array | null, want: number): { geo: BufferGeometry; mask: Uint8Array } | null {
+    let count = data.triangles;
+    if (sel) {
+      count = 0;
+      for (let t = 0; t < data.triangles; t++) if (sel[t] === want) count++;
+    }
+    if (!count) return null;
+    let positions = data.positions, colors = data.colors, mask = data.defaultMask;
+    if (sel) {
+      positions = new Float32Array(count * 9);
+      colors = new Float32Array(count * 9);
+      mask = new Uint8Array(count);
+      let j = 0;
+      for (let t = 0; t < data.triangles; t++) {
+        if (sel[t] !== want) continue;
+        positions.set(data.positions.subarray(t * 9, t * 9 + 9), j * 9);
+        colors.set(data.colors.subarray(t * 9, t * 9 + 9), j * 9);
+        mask[j++] = data.defaultMask[t];
+      }
+    } else {
+      colors = new Float32Array(data.colors); // painted in place by #paintColors
+    }
+    const geo = new BufferGeometry();
+    geo.setAttribute("position", new BufferAttribute(positions, 3));
+    geo.setAttribute("color", new BufferAttribute(colors, 3));
+    geo.computeVertexNormals();
+    return { geo, mask };
+  }
+
   dispose(): void {
     this.#renderer.setAnimationLoop(null);
     this.#removeModel();
@@ -262,6 +362,8 @@ export class ViewerScene {
     this.#controls.dispose();
     this.#material.dispose();
     this.#edgeMaterial.dispose();
+    this.#ghostMaterial.dispose();
+    this.#ghostEdgeMaterial.dispose();
     const axisGeometries = new Set(this.#axes.children.map((c) => (c as Mesh).geometry));
     for (const geometry of axisGeometries) geometry.dispose();
     for (const { solid, hidden } of this.#axisMaterials) {
@@ -304,27 +406,25 @@ export class ViewerScene {
   }
 
   #removeModel(): void {
-    if (this.#mesh) {
-      this.#scene.remove(this.#mesh);
-      this.#mesh.geometry.dispose();
-      this.#mesh = null;
+    for (const obj of [this.#mesh, this.#edges, this.#ghost, this.#ghostEdges]) {
+      if (!obj) continue;
+      this.#scene.remove(obj);
+      obj.geometry.dispose();
     }
-    if (this.#edges) {
-      this.#scene.remove(this.#edges);
-      this.#edges.geometry.dispose();
-      this.#edges = null;
-    }
+    this.#mesh = this.#edges = this.#ghost = this.#ghostEdges = null;
   }
 
   #paintColors(): void {
-    const mask = this.#defaultMask;
-    if (!this.#mesh || !mask) return;
-    const col = this.#mesh.geometry.getAttribute("color") as BufferAttribute;
     const { r, g, b } = this.#modelColor;
-    for (let t = 0; t < mask.length; t++) {
-      if (!mask[t]) continue;
-      for (let k = 0; k < 3; k++) col.setXYZ(t * 3 + k, r, g, b);
+    for (const mesh of [this.#mesh, this.#ghost]) {
+      const mask = mesh?.userData.mask as Uint8Array | undefined;
+      if (!mesh || !mask) continue;
+      const col = mesh.geometry.getAttribute("color") as BufferAttribute;
+      for (let t = 0; t < mask.length; t++) {
+        if (!mask[t]) continue;
+        for (let k = 0; k < 3; k++) col.setXYZ(t * 3 + k, r, g, b);
+      }
+      col.needsUpdate = true;
     }
-    col.needsUpdate = true;
   }
 }

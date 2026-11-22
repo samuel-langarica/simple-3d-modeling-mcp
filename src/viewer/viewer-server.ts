@@ -441,6 +441,7 @@ export class ViewerServer {
       stats: model.stats,
       projectPath: model.projectPath,
       params: model.params,
+      xrayFocus: model.xrayFocus,
     });
   }
 

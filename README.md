@@ -136,6 +136,7 @@ node dist/index.js view ~/my-models --port 6000 --no-open
 - **Projects** (left): folders and `.scad` files under the root (hidden folders, symbolic links, `node_modules`, `exports`, `raw`, `dist`, `assets` are skipped). Click a file to render it.
 - **Parameters** (right): Customizer-style controls for the file in the viewport. Shown: booleans and annotated numbers/strings of the main file, plus annotated ones from the files it `include`s.
   `x = 5; // [0:10]` slider · `x = 5; // [0:0.5:10]` slider with step · `mode = "a"; // [a, b, c]` choices. Text after the annotation is shown as the description.
+- **X-ray** (toolbar): a model can name its focus colours with `echo(xray_focus = ["red", "#c0392b", …]);`. With X-ray on, triangles in those colours stay solid and everything else becomes a faint ghost; without the list, the whole model is ghosted.
 - In MCP mode set `OPENSCAD_PROJECTS_DIR` to get the same panels next to the AI's renders.
 - Paths sent by the page are checked to stay inside the root (no `..`, absolute paths or symlinks out); rendering needs the viewer's own Origin.
 

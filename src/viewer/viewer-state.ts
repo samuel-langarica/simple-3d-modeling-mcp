@@ -25,6 +25,8 @@ export interface ModelVersion {
   projectPath?: string;
   /** Parameter overrides it was rendered with. */
   params?: Record<string, unknown>;
+  /** Colours kept solid in X-ray mode (from echo(xray_focus = [...])). */
+  xrayFocus?: string[];
 }
 
 export interface ModelHistoryEntry {
@@ -42,6 +44,7 @@ export interface AddVersionInput {
   source?: ModelSource;
   projectPath?: string;
   params?: Record<string, unknown>;
+  xrayFocus?: string[];
 }
 
 export class ViewerState {
@@ -79,6 +82,7 @@ export class ViewerState {
       source: input.source,
       projectPath: input.projectPath,
       params: input.params,
+      xrayFocus: input.xrayFocus,
     };
     this._versions.push(entry);
     while (this._versions.length > this._maxVersions) this._versions.shift();

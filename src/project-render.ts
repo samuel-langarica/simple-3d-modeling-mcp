@@ -8,7 +8,7 @@ import { paramAssignments } from "./engine/params.js";
 import { prepareSource } from "./engine/source.js";
 import type { Params } from "./engine/types.js";
 import type { ModelService } from "./model-service.js";
-import { projectRelativePath } from "./viewer/projects.js";
+import { parseXrayFocus, projectRelativePath } from "./viewer/projects.js";
 import type { ProjectsConfig, ViewerServer } from "./viewer/viewer-server.js";
 
 export function createProjectRenderer(models: ModelService, viewer: ViewerServer, root: string): ProjectsConfig {
@@ -33,6 +33,7 @@ export function createProjectRenderer(models: ModelService, viewer: ViewerServer
         source: { code: src.code, file: basename(file), params: overrides.length ? overrides : undefined },
         projectPath: rel,
         params: params && Object.keys(params).length ? params : undefined,
+        xrayFocus: parseXrayFocus(model.log.echo),
       });
       return { ok: true, version: entry.version };
     },

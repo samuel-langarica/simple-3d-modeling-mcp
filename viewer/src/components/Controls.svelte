@@ -3,6 +3,7 @@
   import Focus from "@lucide/svelte/icons/focus";
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
   import Rotate3d from "@lucide/svelte/icons/rotate-3d";
+  import ScanEye from "@lucide/svelte/icons/scan-eye";
   import SquareDashed from "@lucide/svelte/icons/square-dashed";
 
   interface Props {
@@ -10,6 +11,9 @@
     wireframe: boolean;
     autoRotate: boolean;
     grid: boolean;
+    xray: boolean;
+    /** The model names focus colours for X-ray (otherwise X-ray ghosts everything). */
+    hasFocus: boolean;
     onreset: () => void;
   }
 
@@ -18,6 +22,8 @@
     wireframe = $bindable(),
     autoRotate = $bindable(),
     grid = $bindable(),
+    xray = $bindable(),
+    hasFocus,
     onreset,
   }: Props = $props();
 
@@ -37,6 +43,14 @@
   </button>
   <button class={["tool", { on: grid }]} aria-pressed={grid} onclick={() => (grid = !grid)} title="Show the grid and axes">
     <Grid3x3 {...ICON} /><span>Grid</span>
+  </button>
+  <button
+    class={["tool", { on: xray }]}
+    aria-pressed={xray}
+    onclick={() => (xray = !xray)}
+    title={hasFocus ? "X-ray: keep the model's focus parts solid, ghost the rest" : "X-ray: see through the whole model"}
+  >
+    <ScanEye {...ICON} /><span>X-ray</span>
   </button>
   <span class="divider" aria-hidden="true"></span>
   <button class={["tool", { on: autoRotate }]} aria-pressed={autoRotate} onclick={() => (autoRotate = !autoRotate)} title="Spin the model slowly">

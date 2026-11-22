@@ -9,14 +9,29 @@
     mesh: ViewerMesh | null;
     dark: boolean;
     modelColor: string;
+    /** Colours (CSS names or hex) kept solid in X-ray mode. */
+    xrayFocus?: string[];
   }
 
-  let { mesh, dark, modelColor }: Props = $props();
+  let { mesh, dark, modelColor, xrayFocus }: Props = $props();
+
+  /** CSS colour name or hex → 0xRRGGBB, resolved by the browser (OpenSCAD uses the same SVG colour names). */
+  const probe = document.createElement("canvas").getContext("2d");
+  function packColor(css: string): number | null {
+    if (!probe) return null;
+    probe.fillStyle = "#010203";
+    probe.fillStyle = css.trim();
+    const v = String(probe.fillStyle);
+    if (v === "#010203" && css.trim().toLowerCase() !== "#010203") return null;
+    const m = /^#([0-9a-f]{6})$/i.exec(v);
+    return m ? parseInt(m[1], 16) : null;
+  }
 
   let edges = $state(true);
   let wireframe = $state(false);
   let autoRotate = $state(false);
   let grid = $state(true);
+  let xray = $state(false);
   let helpOpen = $state(false);
 
   const scene = new ViewerScene({ onAutoRotateStop: () => (autoRotate = false) });
@@ -28,6 +43,8 @@
   $effect(() => scene.setWireframe(wireframe));
   $effect(() => scene.setAutoRotate(autoRotate));
   $effect(() => scene.setGrid(grid));
+  $effect(() => scene.setXrayFocus((xrayFocus ?? []).map(packColor).filter((c): c is number => c !== null)));
+  $effect(() => scene.setXray(xray));
   $effect(() => {
     if (mesh) scene.load(mesh);
   });
@@ -83,7 +100,7 @@
   </div>
 
   {#if mesh}
-    <Controls bind:edges bind:wireframe bind:autoRotate bind:grid onreset={() => scene.resetView()} />
+    <Controls bind:edges bind:wireframe bind:autoRotate bind:grid bind:xray hasFocus={!!xrayFocus?.length} onreset={() => scene.resetView()} />
   {:else}
     <div class="empty">
       <Logo size={72} />

@@ -121,7 +121,7 @@
         {/if}
       </aside>
     {/if}
-    <Viewport mesh={model?.mesh ?? null} {dark} {modelColor} />
+    <Viewport mesh={model?.mesh ?? null} {dark} {modelColor} xrayFocus={model?.info.xrayFocus} />
 
     <aside class="sidebar">
       <Section title="Model">

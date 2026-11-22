@@ -27,6 +27,8 @@ export interface ModelUpdate extends HistoryEntry {
   projectPath?: string;
   /** Parameter overrides it was rendered with. */
   params?: Record<string, ParamValue>;
+  /** Colours kept solid in X-ray mode (from echo(xray_focus = [...]) in the model). */
+  xrayFocus?: string[];
 }
 
 export type ParamValue = number | boolean | string;

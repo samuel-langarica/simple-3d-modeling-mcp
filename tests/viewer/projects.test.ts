@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { listProjectTree, projectRelativePath, readProjectParams, resolveProjectFile } from "../../src/viewer/projects.js";
+import { listProjectTree, parseXrayFocus, projectRelativePath, readProjectParams, resolveProjectFile } from "../../src/viewer/projects.js";
 import { ViewerServer } from "../../src/viewer/viewer-server.js";
 import { parseViewArgs } from "../../src/view.js";
 
@@ -155,5 +155,16 @@ describe("ViewerServer project API", () => {
     await server.stop();
     server = new ViewerServer({ port });
     expect(await server.start()).toBe(`http://localhost:${port}`);
+  });
+});
+
+describe("parseXrayFocus", () => {
+  it("reads the colour list from an echo line", () => {
+    expect(parseXrayFocus(['"hello"', 'xray_focus = ["red", "#c0392b", "gold"]'])).toEqual(["red", "#c0392b", "gold"]);
+  });
+  it("ignores other lines, non-strings and bad syntax", () => {
+    expect(parseXrayFocus(["x = 1"])).toBeUndefined();
+    expect(parseXrayFocus(['xray_focus = ["red", 3, "blue"]'])).toEqual(["red", "blue"]);
+    expect(parseXrayFocus(["xray_focus = [red]"])).toBeUndefined();
   });
 });

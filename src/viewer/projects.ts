@@ -200,3 +200,21 @@ export function readProjectParams(mainFile: string, root?: string): ProjectParam
   visit(resolve(mainFile), true);
   return [...found.values()];
 }
+
+/**
+ * Colours a model marks as its focus for the viewer's X-ray mode, from an
+ * `echo(xray_focus = ["red", "#c0392b", …]);` line in its echo output.
+ */
+export function parseXrayFocus(echo: readonly string[]): string[] | undefined {
+  for (const line of echo) {
+    const m = /^\s*xray_focus\s*=\s*(\[.*\])\s*$/.exec(line);
+    if (!m) continue;
+    try {
+      const list = JSON.parse(m[1]);
+      if (Array.isArray(list)) return list.filter((x): x is string => typeof x === "string").slice(0, 64);
+    } catch {
+      // not a plain list of strings
+    }
+  }
+  return undefined;
+}

@@ -26,7 +26,7 @@ import { parseView, resolvePreset, VIEW_HELP, VIEW_NAMES, type PresetView } from
 import { renderMultiView, renderTurntable, TurntableTooLargeError } from "./rendering/previews.js";
 import { renderMeshPng } from "./rendering/software-renderer.js";
 import { createProjectRenderer } from "./project-render.js";
-import { projectRelativePath, ViewerServer } from "./viewer/index.js";
+import { parseXrayFocus, projectRelativePath, ViewerServer } from "./viewer/index.js";
 
 // ---------------------------------------------------------------------------
 // Options
@@ -255,6 +255,7 @@ export function createServer(opts: CreateServerOptions): AppServer {
       viewer.pushModel({
         mesh: model.mesh, stats: model.stats, is2D: model.is2D, title: title?.trim() || defaultTitle(src), key: model.key, source,
         projectPath, params: projectPath && params && Object.keys(params).length ? params : undefined,
+        xrayFocus: parseXrayFocus(model.log.echo),
       });
       if (autoOpen && !browserOpened && viewer.url) {
         browserOpened = true;

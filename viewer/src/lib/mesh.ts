@@ -13,6 +13,8 @@ export interface ViewerMesh {
   colors: Float32Array;
   /** One byte per triangle: 1 = no explicit colour, painted with the model colour picker. */
   defaultMask: Uint8Array;
+  /** Per triangle sRGB colour packed as 0xRRGGBB (−1 = default colour); used by X-ray focus. */
+  srgb: Int32Array;
 }
 
 const SRGB_TO_LINEAR = new Float32Array(256).map((_, i) => {
@@ -30,12 +32,14 @@ export function decodeViewerMesh(buf: ArrayBuffer): ViewerMesh {
   const positions = new Float32Array(buf, 16, n * 9);
   const colors = new Float32Array(n * 9);
   const defaultMask = new Uint8Array(n);
+  const srgb = new Int32Array(n).fill(-1);
   const rgba = hasColors ? new Uint8Array(buf, 16 + n * 36, n * 4) : null;
   for (let t = 0; t < n; t++) {
     if (!rgba || rgba[t * 4 + 3] === 0) {
       defaultMask[t] = 1;
       continue;
     }
+    srgb[t] = (rgba[t * 4] << 16) | (rgba[t * 4 + 1] << 8) | rgba[t * 4 + 2];
     const r = SRGB_TO_LINEAR[rgba[t * 4]], g = SRGB_TO_LINEAR[rgba[t * 4 + 1]], b = SRGB_TO_LINEAR[rgba[t * 4 + 2]];
     for (let k = 0; k < 3; k++) {
       colors[t * 9 + k * 3] = r;
@@ -43,5 +47,5 @@ export function decodeViewerMesh(buf: ArrayBuffer): ViewerMesh {
       colors[t * 9 + k * 3 + 2] = b;
     }
   }
-  return { triangles: n, positions, colors, defaultMask };
+  return { triangles: n, positions, colors, defaultMask, srgb };
 }
