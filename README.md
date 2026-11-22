@@ -124,6 +124,21 @@ On the first render an interactive viewer opens in your browser (set `OPENSCAD_A
 
 The viewer listens on `127.0.0.1` only and rejects requests from other web pages (Host and Origin checks).
 
+## Project browser and standalone viewer (fork)
+
+Point the viewer at a folder of `.scad` files and browse it without an AI client:
+
+```bash
+node dist/index.js view ~/my-models            # http://localhost:5317, opens the browser
+node dist/index.js view ~/my-models --port 6000 --no-open
+```
+
+- **Projects** (left): folders and `.scad` files under the root (hidden folders, symbolic links, `node_modules`, `exports`, `raw`, `dist`, `assets` are skipped). Click a file to render it.
+- **Parameters** (right): Customizer-style controls for the file in the viewport. Shown: booleans and annotated numbers/strings of the main file, plus annotated ones from the files it `include`s.
+  `x = 5; // [0:10]` slider · `x = 5; // [0:0.5:10]` slider with step · `mode = "a"; // [a, b, c]` choices. Text after the annotation is shown as the description.
+- In MCP mode set `OPENSCAD_PROJECTS_DIR` to get the same panels next to the AI's renders.
+- Paths sent by the page are checked to stay inside the root (no `..`, absolute paths or symlinks out); rendering needs the viewer's own Origin.
+
 ## Exports
 
 `export` writes to the `path` you give (absolute, or `~/…`), or to the export folder (default: `~/Downloads`, configurable). If a file already exists, a numbered name is used unless `overwrite: true`. The format can come from the path's extension (`~/Desktop/stand.3mf`). Exports reuse the geometry from the last render of the same code, so they are near-instant.
@@ -139,6 +154,7 @@ OpenSCAD runs as its official WebAssembly build (a pinned nightly snapshot) with
 | `OPENSCAD_OUTPUT_DIR` | Folder for exports and relative `save_scad_file` paths | `~/Downloads` |
 | `OPENSCAD_AUTO_OPEN_VIEWER` | Open the browser viewer on the first render | `true` |
 | `OPENSCAD_TIMEOUT` | Seconds before a single OpenSCAD run is stopped | `120` |
+| `OPENSCAD_PROJECTS_DIR` | Folder shown by the viewer's project browser (and the default for `view`) | none |
 
 ## Compatibility Notes
 

@@ -23,7 +23,42 @@ export interface ModelUpdate extends HistoryEntry {
   type: "model-update";
   is2D: boolean;
   stats: ModelStats;
+  /** Path relative to the projects folder, when the model is a file inside it. */
+  projectPath?: string;
+  /** Parameter overrides it was rendered with. */
+  params?: Record<string, ParamValue>;
 }
+
+export type ParamValue = number | boolean | string;
+
+/** GET /api/projects (404 when the server has no projects folder). */
+export interface ProjectNode {
+  name: string;
+  path: string;
+  type: "dir" | "file";
+  children?: ProjectNode[];
+}
+export interface ProjectsResponse {
+  root: string;
+  name: string;
+  tree: ProjectNode[];
+}
+
+/** GET /api/params?path=… */
+export interface ProjectParam {
+  name: string;
+  type: "number" | "boolean" | "string";
+  value: ParamValue;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: Array<number | string>;
+  description?: string;
+  file: string;
+}
+
+/** POST /api/render {path, params} */
+export type RenderResponse = { ok: true; version: number } | { ok: false; errors: string[]; warnings?: string[] } | { error: string };
 
 export interface ModelHistory {
   type: "model-history";

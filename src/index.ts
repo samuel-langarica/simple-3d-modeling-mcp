@@ -13,6 +13,10 @@ import { createServer } from "./server.js";
 const log = (message: string) => console.error(`[sketchpad-3d-model-mcp] ${message}`);
 
 async function main() {
+  if (process.argv[2] === "view") {
+    const { runView } = await import("./view.js");
+    return runView(process.argv.slice(3));
+  }
   const { config, warnings } = readConfig();
   warnings.forEach(log);
 
@@ -22,6 +26,7 @@ async function main() {
     outputDir: config.outputDir,
     autoOpenViewer: config.autoOpenViewer,
     notes: warnings,
+    projectsRoot: config.projectsDir,
   });
 
   // The stdio transport also exits the process itself on stdin end, SIGINT and

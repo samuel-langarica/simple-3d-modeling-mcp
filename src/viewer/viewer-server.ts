@@ -14,11 +14,14 @@ import { execFile } from "node:child_process";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { platform, tmpdir } from "node:os";
-import { extname, join } from "node:path";
+import { basename, extname, join } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import { isDefaultColor } from "../geometry/mesh.js";
 import { VIEWER_UI_DIR } from "../paths.js";
 import { write3mf, writeBinaryStl } from "../geometry/writers.js";
+import { UserError } from "../errors.js";
+import type { Params } from "../engine/types.js";
+import { listProjectTree, readProjectParams, resolveProjectFile } from "./projects.js";
 import { ViewerState, type AddVersionInput, type ModelVersion } from "./viewer-state.js";
 
 const SLICERS: Record<string, { mac: string; win: string; linux: string }> = {
@@ -132,11 +135,55 @@ async function listUiFiles(dir: string, prefix = ""): Promise<Map<string, string
   return files;
 }
 
+/** Result of rendering a project file for the page. */
+export type ProjectRenderResult = { ok: true; version: number } | { ok: false; errors: string[]; warnings?: string[] };
+
+/** Lets the page browse and render the .scad files under `root`. */
+export interface ProjectsConfig {
+  root: string;
+  /** Renders an absolute .scad path (already checked to be inside root) and pushes it to the viewer. */
+  render(file: string, params: Params | undefined): Promise<ProjectRenderResult>;
+}
+
 export interface ViewerServerOptions {
   maxVersions?: number;
   /** Directory of the built viewer page (default: dist/viewer-ui in this package). */
   uiDir?: string;
+  /** Fixed port (default: a random free one). */
+  port?: number;
+  projects?: ProjectsConfig;
 }
+
+const MAX_BODY = 64 * 1024;
+
+function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => {
+      size += c.length;
+      if (size > MAX_BODY) {
+        reject(new UserError("Request too large"));
+        req.destroy();
+      } else chunks.push(c);
+    });
+    req.on("end", () => {
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8") || "null"));
+      } catch {
+        reject(new UserError("Invalid JSON"));
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+function sendJson(res: ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-cache" });
+  res.end(JSON.stringify(body));
+}
+
+const PARAM_VALUE = (v: unknown): boolean => typeof v === "number" ? Number.isFinite(v) : typeof v === "boolean" || typeof v === "string";
 
 export class ViewerServer {
   private _server: Server | null = null;
@@ -148,12 +195,25 @@ export class ViewerServer {
   private readonly _uiDir: string;
   private _uiFiles: Promise<Map<string, string>> | null = null;
   private readonly _uiCache = new Map<string, Buffer>();
+  private readonly _fixedPort: number;
+  private _projects: ProjectsConfig | null;
   readonly state: ViewerState;
 
   constructor(opts: ViewerServerOptions | number = {}) {
     const o = typeof opts === "number" ? { maxVersions: opts } : opts;
     this.state = new ViewerState(o.maxVersions ?? 30);
     this._uiDir = o.uiDir ?? VIEWER_UI_DIR;
+    this._fixedPort = o.port ?? 0;
+    this._projects = o.projects ?? null;
+  }
+
+  /** Enables (or replaces) the project browser. */
+  setProjects(projects: ProjectsConfig | null): void {
+    this._projects = projects;
+  }
+
+  get projectsRoot(): string | null {
+    return this._projects?.root ?? null;
   }
 
   get isRunning(): boolean {
@@ -199,7 +259,7 @@ export class ViewerServer {
       wss.on("connection", (ws) => this.onConnection(ws));
 
       server.on("error", reject);
-      server.listen(0, "127.0.0.1", () => {
+      server.listen(this._fixedPort, "127.0.0.1", () => {
         const addr = server.address();
         if (addr && typeof addr === "object") {
           this._port = addr.port;
@@ -224,6 +284,8 @@ export class ViewerServer {
     const path = url.pathname;
 
     if (req.method === "GET" && (await this.serveUi(path, res))) return;
+
+    if (path.startsWith("/api/")) return this.handleApi(req, res, url);
 
     let m = /^\/mesh\/(\d+)$/.exec(path);
     if (req.method === "GET" && m) {
@@ -290,6 +352,42 @@ export class ViewerServer {
     this.notFound(res);
   }
 
+  /** Project browser API: GET /api/projects, GET /api/params?path=…, POST /api/render {path, params}. */
+  private async handleApi(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+    const projects = this._projects;
+    if (!projects) return sendJson(res, 404, { error: "No projects folder configured" });
+    try {
+      if (req.method === "GET" && url.pathname === "/api/projects") {
+        return sendJson(res, 200, { root: projects.root, name: basename(projects.root), tree: listProjectTree(projects.root) });
+      }
+      if (req.method === "GET" && url.pathname === "/api/params") {
+        const file = resolveProjectFile(projects.root, url.searchParams.get("path"));
+        return sendJson(res, 200, { params: readProjectParams(file, projects.root) });
+      }
+      if (req.method === "POST" && url.pathname === "/api/render") {
+        if (!this.allowedOrigin(req.headers.origin)) {
+          res.writeHead(403);
+          res.end("Forbidden");
+          return;
+        }
+        const body = (await readJsonBody(req)) as { path?: unknown; params?: unknown } | null;
+        const file = resolveProjectFile(projects.root, body?.path);
+        let params: Params | undefined;
+        if (body?.params !== undefined && body.params !== null) {
+          if (typeof body.params !== "object" || Array.isArray(body.params)) throw new UserError("Invalid params");
+          const entries = Object.entries(body.params as Record<string, unknown>);
+          if (entries.length > 200 || !entries.every(([, v]) => PARAM_VALUE(v))) throw new UserError("Invalid params");
+          params = Object.fromEntries(entries) as Params;
+        }
+        return sendJson(res, 200, await projects.render(file, params));
+      }
+      return this.notFound(res);
+    } catch (e) {
+      if (e instanceof UserError) return sendJson(res, 400, { error: e.message });
+      throw e;
+    }
+  }
+
   /**
    * Serves a file of the built page; returns false when `path` is not one.
    * Every page load lists the build again, so a first build or a rebuild of
@@ -341,6 +439,8 @@ export class ViewerServer {
       timestamp: model.timestamp,
       is2D: model.is2D,
       stats: model.stats,
+      projectPath: model.projectPath,
+      params: model.params,
     });
   }
 

@@ -21,6 +21,10 @@ export interface ModelVersion {
   /** Identifies the source+params that produced the mesh (dedupes repeat pushes). */
   key?: string;
   source?: ModelSource;
+  /** Path relative to the projects folder, when the model is a file inside it. */
+  projectPath?: string;
+  /** Parameter overrides it was rendered with. */
+  params?: Record<string, unknown>;
 }
 
 export interface ModelHistoryEntry {
@@ -36,6 +40,8 @@ export interface AddVersionInput {
   is2D?: boolean;
   key?: string;
   source?: ModelSource;
+  projectPath?: string;
+  params?: Record<string, unknown>;
 }
 
 export class ViewerState {
@@ -71,6 +77,8 @@ export class ViewerState {
       is2D: input.is2D ?? false,
       key: input.key,
       source: input.source,
+      projectPath: input.projectPath,
+      params: input.params,
     };
     this._versions.push(entry);
     while (this._versions.length > this._maxVersions) this._versions.shift();

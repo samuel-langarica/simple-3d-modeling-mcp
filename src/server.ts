@@ -25,7 +25,8 @@ import { bundledLibraries, bundledLibraryVersion, PACKAGE_NAME, PACKAGE_VERSION 
 import { parseView, resolvePreset, VIEW_HELP, VIEW_NAMES, type PresetView } from "./rendering/camera.js";
 import { renderMultiView, renderTurntable, TurntableTooLargeError } from "./rendering/previews.js";
 import { renderMeshPng } from "./rendering/software-renderer.js";
-import { ViewerServer } from "./viewer/index.js";
+import { createProjectRenderer } from "./project-render.js";
+import { projectRelativePath, ViewerServer } from "./viewer/index.js";
 
 // ---------------------------------------------------------------------------
 // Options
@@ -42,6 +43,8 @@ export interface CreateServerOptions {
   openUrl?: (url: string) => void;
   /** Notes about configuration shown by get_version. */
   notes?: string[];
+  /** Folder the viewer's project browser lists and renders (optional). */
+  projectsRoot?: string;
 }
 
 export type AppMcpServer = McpServer<z.ZodType>;
@@ -221,6 +224,7 @@ export function createServer(opts: CreateServerOptions): AppServer {
   const autoOpen = opts.autoOpenViewer ?? true;
   const engine = opts.engine;
   const models = new ModelService(engine);
+  if (opts.projectsRoot) viewer.setProjects(createProjectRenderer(models, viewer, opts.projectsRoot));
   let browserOpened = false;
 
   /** Wraps a handler: user errors and oversized payloads become isError results instead of protocol errors. */
@@ -246,7 +250,12 @@ export function createServer(opts: CreateServerOptions): AppServer {
       if (!viewer.isRunning) await viewer.start();
       const overrides = paramAssignments(params);
       const source = { code: src.code, file: src.path ? basename(src.path) : undefined, params: overrides.length ? overrides : undefined };
-      viewer.pushModel({ mesh: model.mesh, stats: model.stats, is2D: model.is2D, title: title?.trim() || defaultTitle(src), key: model.key, source });
+      const root = viewer.projectsRoot;
+      const projectPath = root && src.path ? projectRelativePath(root, src.path) : undefined;
+      viewer.pushModel({
+        mesh: model.mesh, stats: model.stats, is2D: model.is2D, title: title?.trim() || defaultTitle(src), key: model.key, source,
+        projectPath, params: projectPath && params && Object.keys(params).length ? params : undefined,
+      });
       if (autoOpen && !browserOpened && viewer.url) {
         browserOpened = true;
         openUrl(viewer.url);

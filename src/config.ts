@@ -4,6 +4,7 @@
  *   OPENSCAD_TIMEOUT           seconds per OpenSCAD run         (default 120)
  *   OPENSCAD_OUTPUT_DIR        default folder for exports       (default ~/Downloads)
  *   OPENSCAD_AUTO_OPEN_VIEWER  open the browser viewer on first render (default true)
+ *   OPENSCAD_PROJECTS_DIR      folder the viewer's project browser shows (default: none)
  */
 
 import { existsSync } from "node:fs";
@@ -15,6 +16,7 @@ export interface ServerConfig {
   timeoutMs: number;
   outputDir: string;
   autoOpenViewer: boolean;
+  projectsDir?: string;
 }
 
 /** Treat blank values and unsubstituted placeholders (e.g. "${user_config.x}") as unset. */
@@ -57,11 +59,20 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): { config: Serv
     else warnings.push(`Ignoring OPENSCAD_OUTPUT_DIR="${out}" (must be an absolute path).`);
   }
 
+  let projectsDir: string | undefined;
+  const proj = clean(env.OPENSCAD_PROJECTS_DIR);
+  if (proj) {
+    const expanded = expandHome(proj);
+    if (isAbsolute(expanded) && existsSync(expanded)) projectsDir = resolve(expanded);
+    else warnings.push(`Ignoring OPENSCAD_PROJECTS_DIR="${proj}" (must be an existing absolute path).`);
+  }
+
   return {
     config: {
       timeoutMs,
       outputDir,
       autoOpenViewer: parseBool(clean(env.OPENSCAD_AUTO_OPEN_VIEWER), true),
+      ...(projectsDir ? { projectsDir } : {}),
     },
     warnings,
   };

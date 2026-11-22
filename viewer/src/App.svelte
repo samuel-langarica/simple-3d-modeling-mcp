@@ -4,13 +4,15 @@
   import Dimensions from "./components/Dimensions.svelte";
   import Export from "./components/Export.svelte";
   import History from "./components/History.svelte";
+  import Parameters from "./components/Parameters.svelte";
+  import Projects from "./components/Projects.svelte";
   import Section from "./components/Section.svelte";
   import TopBar from "./components/TopBar.svelte";
   import Viewport from "./components/Viewport.svelte";
   import { ViewerConnection } from "./lib/connection.svelte.js";
   import { modelTitle } from "./lib/format.js";
   import { decodeViewerMesh, type ViewerMesh } from "./lib/mesh.js";
-  import type { ModelUpdate } from "./lib/protocol.js";
+  import type { ModelUpdate, ParamValue, ProjectsResponse, RenderResponse } from "./lib/protocol.js";
 
   const THEME_KEY = "viewer-theme";
   const PAGE_TITLE = document.title;
@@ -54,6 +56,43 @@
   }
 
   const connection = new ViewerConnection(showUpdate);
+
+  // -- Project browser (only when the server has a projects folder) --
+  let projects = $state.raw<ProjectsResponse | null>(null);
+  let busy = $state<string | null>(null);
+  let renderError = $state<{ path: string; errors: string[] } | null>(null);
+
+  async function loadProjects() {
+    try {
+      const res = await fetch("/api/projects");
+      projects = res.ok ? await res.json() : null;
+    } catch {
+      projects = null;
+    }
+  }
+  $effect(() => {
+    void loadProjects();
+  });
+
+  async function renderProject(path: string, params?: Record<string, ParamValue>) {
+    busy = path;
+    renderError = null;
+    try {
+      const res = await fetch("/api/render", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path, params }),
+      });
+      const body: RenderResponse = await res.json();
+      if ("error" in body) renderError = { path, errors: [body.error] };
+      else if (!body.ok) renderError = { path, errors: body.errors };
+      else connection.requestModel(body.version);
+    } catch (e) {
+      renderError = { path, errors: [String((e as Error).message ?? e)] };
+    } finally {
+      if (busy === path) busy = null;
+    }
+  }
   $effect(() => {
     connection.connect();
     return () => connection.close();
@@ -71,6 +110,17 @@
   <TopBar status={connection.status} {dark} ontoggletheme={toggleTheme} />
 
   <main>
+    {#if projects}
+      <aside class="sidebar left">
+        <Projects data={projects} active={model?.info.projectPath} {busy} onselect={(p) => renderProject(p)} onrefresh={loadProjects} />
+        {#if renderError}
+          <div class="render-error" role="alert">
+            <strong>{renderError.path}</strong>
+            {#each renderError.errors as e}<pre>{e}</pre>{/each}
+          </div>
+        {/if}
+      </aside>
+    {/if}
     <Viewport mesh={model?.mesh ?? null} {dark} {modelColor} />
 
     <aside class="sidebar">
@@ -88,6 +138,10 @@
           <p class="title none">No model yet</p>
         {/if}
       </Section>
+      {#if projects && model?.info.projectPath}
+        {@const path = model.info.projectPath}
+        <Parameters {path} applied={model.info.params} onapply={(params) => renderProject(path, params)} />
+      {/if}
       <Dimensions model={model?.info ?? null} />
       <History entries={connection.history} active={model?.info.version} onselect={(version) => connection.requestModel(version)} />
       <Code version={model?.info.version} title={model?.info.title} />
@@ -112,6 +166,9 @@
     border-left: var(--rule);
     overflow-y: auto;
   }
+  .sidebar.left { width: 260px; border-left: 0; border-right: var(--rule); }
+  .render-error { padding: 12px 20px; border-top: var(--rule); color: var(--bauhaus-red); font-size: 12px; max-height: 40%; overflow: auto; }
+  .render-error pre { margin-top: 6px; white-space: pre-wrap; font: 11px var(--font-mono); }
   /* The last section sits on the bottom edge: no rule needed under it. */
   .sidebar > :global(:last-child) { border-bottom: 0; }
 
@@ -125,6 +182,7 @@
     .app { height: auto; }
     main { flex-direction: column; }
     main > :global(.viewport) { flex: none; height: 62vh; }
-    .sidebar { width: auto; border-left: 0; border-top: var(--rule); overflow: visible; }
+    .sidebar, .sidebar.left { width: auto; border-left: 0; border-right: 0; border-top: var(--rule); overflow: visible; }
+    .sidebar.left { order: 2; }
   }
 </style>
